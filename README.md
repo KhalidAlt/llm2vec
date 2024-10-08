@@ -16,8 +16,6 @@ LLM2Vec is a simple recipe to convert decoder-only LLMs into text encoders. It c
 
 **************************** **Updates** ****************************
 
-* 03/10: Added support for latest transformer versions, which support Llama 3.1, 3.2 and other latest models. Expanded support to evaluate any LLM2vec model, check [mteb_eval_custom.py](https://github.com/McGill-NLP/llm2vec/blob/main/experiments/mteb_eval_custom.py)
-
 * 04/07: Added support for Gemma and Qwen-2 models, huge thanks to [@bzantium](https://github.com/bzantium) for the contribution.
 
 * 30/04: We release LLM2Vec transformed Meta-Llama-3 checkpoints. See our [HuggingFace collection](https://huggingface.co/collections/McGill-NLP/llm2vec-660e14f536b3c8d10b3f1c34) for both [supervised](https://huggingface.co/McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised) and [unsupervised](https://huggingface.co/McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-unsup-simcse) variants.
@@ -287,13 +285,12 @@ The evaluation script supports all the models available in the [HuggingFace coll
 ## Citation
 If you find our work helpful, please cite us:
 ```bibtex
-@inproceedings{
-llm2vec,
-title={{LLM2V}ec: Large Language Models Are Secretly Powerful Text Encoders},
-author={Parishad BehnamGhader and Vaibhav Adlakha and Marius Mosbach and Dzmitry Bahdanau and Nicolas Chapados and Siva Reddy},
-booktitle={First Conference on Language Modeling},
-year={2024},
-url={https://openreview.net/forum?id=IW1PR7vEBf}
+@article{llm2vec,
+      title={{LLM2Vec}: {L}arge Language Models Are Secretly Powerful Text Encoders}, 
+      author={Parishad BehnamGhader and Vaibhav Adlakha and Marius Mosbach and Dzmitry Bahdanau and Nicolas Chapados and Siva Reddy},
+      year={2024},
+      journal={arXiv preprint},
+      url={https://arxiv.org/abs/2404.05961}
 }
 ```
 

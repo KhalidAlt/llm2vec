@@ -57,6 +57,8 @@ from llm2vec.models import (
     LlamaBiForMNTP,
     GemmaBiForMNTP,
     Qwen2BiForMNTP,
+    JaisBiForMNTP,
+    
 )
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
@@ -82,6 +84,9 @@ def get_model_class(config):
         return GemmaBiForMNTP
     elif config_class_name == "Qwen2Config":
         return Qwen2BiForMNTP
+    elif config_class_name == "JAISConfig":
+        return JaisBiForMNTP
+    
     else:
         raise ValueError(f"Model class {config_class_name} not supported.")
 
@@ -98,6 +103,7 @@ def initialize_peft(
         "MistralConfig",
         "GemmaConfig",
         "Qwen2Config",
+        "JAISConfig",
     ]:
         lora_modules = [
             "q_proj",
@@ -467,6 +473,7 @@ def main():
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
+
     parser = HfArgumentParser(
         (ModelArguments, DataTrainingArguments, TrainingArguments, CustomArguments)
     )
@@ -714,12 +721,15 @@ def main():
         lora_alpha=2 * custom_args.lora_r,
         lora_dropout=custom_args.lora_dropout,
     )
-
+    
+    #model = torch.nn.DataParallel(model)
+    
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
     embedding_size = model.get_input_embeddings().weight.shape[0]
     if len(tokenizer) > embedding_size:
         model.resize_token_embeddings(len(tokenizer))
+
 
     # Preprocessing the datasets.
     # First we tokenize all the texts.

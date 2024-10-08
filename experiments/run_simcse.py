@@ -241,6 +241,7 @@ class StopTrainingCallback(TrainerCallback):
 
 
 class SimCSETrainer(Trainer):
+
     def __init__(
         self,
         *args,

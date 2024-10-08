@@ -1,5 +1,8 @@
 import torch
 
+from packaging import version
+import importlib.metadata
+
 from transformers import LlamaModel, LlamaForCausalLM, LlamaPreTrainedModel, LlamaConfig
 from transformers.models.llama.modeling_llama import (
     LlamaDecoderLayer,
@@ -8,19 +11,35 @@ from transformers.models.llama.modeling_llama import (
     LlamaSdpaAttention,
     LlamaMLP,
     LlamaRMSNorm,
-    LlamaRotaryEmbedding,
 )
 
 from torch import nn
 from transformers.utils import logging
-from transformers.cache_utils import Cache, StaticCache
 
 from transformers.modeling_attn_mask_utils import AttentionMaskConverter
-from .utils import is_transformers_attn_greater_or_equal_4_43_1
+from transformers.utils.import_utils import _is_package_available
 
 from peft import PeftModel
 
 logger = logging.get_logger(__name__)
+
+
+def is_transformers_attn_greater_or_equal_4_38():
+    if not _is_package_available("transformers"):
+        return False
+
+    return version.parse(importlib.metadata.version("transformers")) >= version.parse(
+        "4.38.0"
+    )
+
+
+def is_transformers_attn_greater_or_equal_4_40():
+    if not _is_package_available("transformers"):
+        return False
+
+    return version.parse(importlib.metadata.version("transformers")) >= version.parse(
+        "4.40.0"
+    )
 
 
 class ModifiedLlamaAttention(LlamaAttention):
@@ -68,9 +87,9 @@ class LlamaBiModel(LlamaModel):
     _no_split_modules = ["ModifiedLlamaDecoderLayer"]
 
     def __init__(self, config: LlamaConfig):
-        if not is_transformers_attn_greater_or_equal_4_43_1():
+        if not is_transformers_attn_greater_or_equal_4_38():
             raise ValueError(
-                "The current implementation of LlamaEncoderModel follows modeling_llama.py of transformers version >= 4.43.1"
+                "The current implementation of LlamaEncoderModel follows modeling_llama.py of transformers version >= 4.38.0"
             )
         LlamaPreTrainedModel.__init__(self, config)
         self.padding_idx = config.pad_token_id
@@ -86,7 +105,6 @@ class LlamaBiModel(LlamaModel):
             ]
         )
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.rotary_emb = LlamaRotaryEmbedding(config=config)
         self.gradient_checkpointing = False
 
         # Initialize weights and apply final processing
@@ -97,42 +115,38 @@ class LlamaBiModel(LlamaModel):
         attention_mask,
         input_tensor,
         cache_position,
-        past_key_values: Cache,
-        output_attentions: bool,
+        past_seen_tokens=None,
+        output_attentions=False,
     ):
         if self.config._attn_implementation == "flash_attention_2":
             if attention_mask is not None and 0.0 in attention_mask:
                 return attention_mask
             return None
 
-        # For SDPA, when possible, we will rely on its `is_causal` argument instead of its `attn_mask` argument, in
-        # order to dispatch on Flash Attention 2. This feature is not compatible with static cache, as SDPA will fail
-        # to infer the attention mask.
-        past_seen_tokens = (
-            past_key_values.get_seq_length() if past_key_values is not None else 0
-        )
-        using_static_cache = isinstance(past_key_values, StaticCache)
-
-        # When output attentions is True, sdpa implementation's forward method calls the eager implementation's forward
-        # if self.config._attn_implementation == "sdpa" and not using_static_cache and not output_attentions:
+        # if is_transformers_attn_greater_or_equal_4_40() and self.config._attn_implementation == "sdpa":
+        #     # For SDPA, when possible, we will rely on its `is_causal` argument instead of its `attn_mask` argument,
+        #     # in order to dispatch on Flash Attention 2.
         #     if AttentionMaskConverter._ignore_causal_mask_sdpa(
-        #         attention_mask,
-        #         inputs_embeds=input_tensor,
-        #         past_key_values_length=past_seen_tokens,
-        #         is_training=self.training,
+        #         attention_mask, inputs_embeds=input_tensor, past_key_values_length=past_seen_tokens
         #     ):
         #         return None
 
         dtype, device = input_tensor.dtype, input_tensor.device
         min_dtype = torch.finfo(dtype).min
         sequence_length = input_tensor.shape[1]
-        if using_static_cache:
-            target_length = past_key_values.get_max_length()
-        else:
+        if hasattr(
+            getattr(self.layers[0], "self_attn", {}), "past_key_value"
+        ):  # static cache
+            target_length = self.config.max_position_embeddings
+        else:  # dynamic cache
             target_length = (
                 attention_mask.shape[-1]
                 if isinstance(attention_mask, torch.Tensor)
-                else past_seen_tokens + sequence_length + 1
+                else (
+                    cache_position[-1] + 1
+                    if not is_transformers_attn_greater_or_equal_4_40()
+                    else past_seen_tokens + sequence_length + 1
+                )
             )
 
         causal_mask = torch.zeros(
