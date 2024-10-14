@@ -103,7 +103,6 @@ def initialize_peft(
         "MistralConfig",
         "GemmaConfig",
         "Qwen2Config",
-        "JAISConfig",
     ]:
         lora_modules = [
             "q_proj",
@@ -114,6 +113,19 @@ def initialize_peft(
             "up_proj",
             "down_proj",
         ]
+
+    elif lora_modules is None and model.config.__class__.__name__ in [
+        "JAISConfig",
+
+    ]:
+        lora_modules = [
+            "c_attn", 
+            "c_proj", 
+            "c_fc"
+        ]
+
+        
+    
     elif lora_modules is None:
         raise ValueError("lora_modules must be specified for this model.")
 
@@ -711,18 +723,36 @@ def main():
         trust_remote_code=model_args.trust_remote_code,
         torch_dtype=torch_dtype,
         low_cpu_mem_usage=model_args.low_cpu_mem_usage,
-        attn_implementation=model_args.attn_implementation,
+        #attn_implementation=model_args.attn_implementation,
     )
 
-    # model organization is MODEL_TYPEBiForMNTP.model -> MODEL_TYPELBiModel, we have to apply PEFT to the inner model
-    model.model = initialize_peft(
-        model.model,
-        lora_r=custom_args.lora_r,
-        lora_alpha=2 * custom_args.lora_r,
-        lora_dropout=custom_args.lora_dropout,
-    )
+    ## Jais use model.transformer instead of model.model
+    # Jais codebase should be update to follow transformers better
+    # TODO: Fix JAIS codebase
     
-    #model = torch.nn.DataParallel(model)
+    config_class_name = config.__class__.__name__
+
+    if config_class_name == 'JAISConfig':
+
+        print("#### Jais peft")
+        # Apply PEFT to the inner model of JaisBiForMNTP
+        
+        model.transformer = initialize_peft(
+            model.transformer,
+            lora_r=custom_args.lora_r,
+            lora_alpha=2 * custom_args.lora_r,
+            lora_dropout=custom_args.lora_dropout,
+        )
+    
+    else:
+        # model organization is MODEL_TYPEBiForMNTP.model -> MODEL_TYPELBiModel, we have to apply PEFT to the inner model
+        model.model = initialize_peft(
+            model.model,
+            lora_r=custom_args.lora_r,
+            lora_alpha=2 * custom_args.lora_r,
+            lora_dropout=custom_args.lora_dropout,
+        )
+    
     
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.

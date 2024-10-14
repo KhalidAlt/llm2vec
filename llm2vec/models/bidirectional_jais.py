@@ -37,6 +37,7 @@ class ModifiedJAISAttention(JAISAttention):
         if self.scale_attn_by_inverse_layer_idx:
             attn_weights = attn_weights / float(self.layer_idx + 1)
 
+
         if attention_mask is not None:
             attn_weights = attn_weights + attention_mask
 
@@ -78,6 +79,7 @@ class ModifiedJAISAttention(JAISAttention):
                 attn_weights, q.float(), k.float(), beta=0, alpha=scale_factor
             )
             attn_weights = attn_weights.reshape(bsz, num_heads, q_seq_len, k_seq_len)
+
 
         if attention_mask is not None:
             attn_weights = attn_weights + attention_mask
@@ -171,6 +173,7 @@ class JaisBiModel(JAISPreTrainedModel):
         self.wte = new_embeddings
 
 
+
 class JaisBiForMNTP(JAISLMHeadModel):
     def __init__(self, config):
         super().__init__(config)
@@ -189,6 +192,10 @@ class JaisBiForMNTP(JAISLMHeadModel):
     def get_model_for_peft(self):
         return self.transformer
 
+    # get the base model
+    def get_base_model(self):
+        return self.transformer
+    
     # Setter for PEFT model
     def set_model_for_peft(self, model: PeftModel):
         self.transformer = model
@@ -196,3 +203,6 @@ class JaisBiForMNTP(JAISLMHeadModel):
     # Save the PEFT model
     def save_peft_model(self, path):
         self.transformer.save_pretrained(path)
+
+    def forward(self, *args, **kwargs):
+        return super().forward(*args, **kwargs)
