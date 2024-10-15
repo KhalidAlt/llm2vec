@@ -1193,7 +1193,7 @@ class JAISLMHeadModel(JAISPreTrainedModel):
             are ignored (masked), the loss is only computed for labels in `[0, ..., config.vocab_size]`
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        print("###1 Load transformer:")
+        print("######################### self.transformer:", self.transformer)
         transformer_outputs = self.transformer(
             input_ids,
             past_key_values=past_key_values,
@@ -1209,9 +1209,7 @@ class JAISLMHeadModel(JAISPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        
-        print("###1 Done Load transformer:")
-
+        print("############ DONE")
         hidden_states = transformer_outputs[0]
 
         # Set device for model parallelism
