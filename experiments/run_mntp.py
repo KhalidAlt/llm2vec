@@ -454,31 +454,35 @@ class StopTrainingCallback(TrainerCallback):
         if state.global_step >= self.stop_after_n_steps:
             control.should_training_stop = True
 
+def truncate_dict_values(d, max_length=500):
+    """Truncate all string values in a dictionary to max_length characters."""
+    return {k: v if not isinstance(v, str) else v[:max_length] for k, v in d.__dict__.items() 
+            if not k.startswith('_')}
 
 class MNTPTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.label_names = ["labels"]
 
-    def _remove_unused_columns(
-        self, dataset: "datasets.Dataset", description: Optional[str] = None
-    ):
+    def _remove_unused_columns(self, dataset: "datasets.Dataset", description: Optional[str] = None):
         return dataset
 
-    # We need a custom save function as we have to save the inner model
+    def log_metrics(self, split, metrics, **kwargs):
+        """Override to handle long values"""
+        metrics = {k: v if not isinstance(v, str) else v[:500] for k, v in metrics.items()}
+        super().log_metrics(split, metrics, **kwargs)
+
     def _save(self, output_dir: Optional[str] = None, state_dict=None):
-        # If we are executing this function, we are the process zero, so we don't check for that.
         output_dir = output_dir if output_dir is not None else self.args.output_dir
         os.makedirs(output_dir, exist_ok=True)
         logger.info(f"Saving model checkpoint to {output_dir}")
-
-        # model organization is MODEL_TYPEBiForMNTP.model -> MODEL_TYPELBiModel, we have to save the inner model, handled by save_peft_model function of the outer model
+        
         self.model.save_peft_model(output_dir)
         self.tokenizer.save_pretrained(output_dir)
-
-        # Good practice: save your training arguments together with the trained model
-        torch.save(self.args, os.path.join(output_dir, "training_args.bin"))
-
+        
+        # Truncate args before saving
+        training_args_dict = truncate_dict_values(self.args)
+        torch.save(training_args_dict, os.path.join(output_dir, "training_args.bin"))
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -1035,3 +1039,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
