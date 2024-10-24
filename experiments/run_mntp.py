@@ -446,57 +446,39 @@ class DataCollatorForLanguageModelingWithFullMasking(DataCollatorForLanguageMode
         return inputs, labels
 
 
-from transformers.integrations.integration_utils import MLflowCallback
+class StopTrainingCallback(TrainerCallback):
+    def __init__(self, stop_after_n_steps: int):
+        self.stop_after_n_steps = stop_after_n_steps
 
-class CustomMLflowCallback(MLflowCallback):
-    def setup(self, args, state, model):
-        """
-        Override setup to handle parameter logging with value truncation
-        """
-        if state.is_world_process_zero:
-            if self._initialized:
-                return
-            self._initialized = True
-            
-            combined_dict = args.to_dict()
-            if hasattr(model, "config") and model.config is not None:
-                model_config = model.config.to_dict()
-                combined_dict = {**model_config, **combined_dict}
-            
-            # Truncate long parameter values and convert all values to strings
-            params_truncated = {}
-            for k, v in combined_dict.items():
-                if isinstance(v, (list, dict)):
-                    v = str(v)
-                if isinstance(v, str) and len(v) > 500:
-                    v = v[:500]
-                params_truncated[k] = v
-            
-            self._ml_flow.log_params(params_truncated)
+    def on_step_end(self, args, state, control, **kwargs):
+        if state.global_step >= self.stop_after_n_steps:
+            control.should_training_stop = True
+
+
 class MNTPTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.label_names = ["labels"]
 
-    def _remove_unused_columns(self, dataset: "datasets.Dataset", description: Optional[str] = None):
+    def _remove_unused_columns(
+        self, dataset: "datasets.Dataset", description: Optional[str] = None
+    ):
         return dataset
 
-    def log_metrics(self, split, metrics, **kwargs):
-        """Override to handle long values"""
-        metrics = {k: v if not isinstance(v, str) else v[:500] for k, v in metrics.items()}
-        super().log_metrics(split, metrics, **kwargs)
-
+    # We need a custom save function as we have to save the inner model
     def _save(self, output_dir: Optional[str] = None, state_dict=None):
+        # If we are executing this function, we are the process zero, so we don't check for that.
         output_dir = output_dir if output_dir is not None else self.args.output_dir
         os.makedirs(output_dir, exist_ok=True)
         logger.info(f"Saving model checkpoint to {output_dir}")
-        
+
+        # model organization is MODEL_TYPEBiForMNTP.model -> MODEL_TYPELBiModel, we have to save the inner model, handled by save_peft_model function of the outer model
         self.model.save_peft_model(output_dir)
         self.tokenizer.save_pretrained(output_dir)
-        
-        # Truncate args before saving
-        training_args_dict = truncate_dict_values(self.args)
-        torch.save(training_args_dict, os.path.join(output_dir, "training_args.bin"))
+
+        # Good practice: save your training arguments together with the trained model
+        torch.save(self.args, os.path.join(output_dir, "training_args.bin"))
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -971,11 +953,7 @@ def main():
         pad_to_multiple_of=8 if pad_to_multiple_of_8 else None,
     )
 
-    callbacks = [
-        StopTrainingCallback(custom_args.stop_after_n_steps),
-        CustomMLflowCallback()
-    ]
-    
+    # Initialize our Trainer
     trainer = MNTPTrainer(
         model=model,
         args=training_args,
@@ -983,7 +961,6 @@ def main():
         eval_dataset=eval_dataset if training_args.do_eval else None,
         tokenizer=tokenizer,
         data_collator=data_collator,
-        callbacks=callbacks,
         compute_metrics=(
             compute_metrics
             if training_args.do_eval and not is_torch_tpu_available()
@@ -995,7 +972,8 @@ def main():
             else None
         ),
     )
-    #trainer.add_callback(StopTrainingCallback(custom_args.stop_after_n_steps))
+
+    trainer.add_callback(StopTrainingCallback(custom_args.stop_after_n_steps))
 
     # Training
     if training_args.do_train:
