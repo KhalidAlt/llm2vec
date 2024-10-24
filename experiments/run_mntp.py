@@ -446,7 +446,7 @@ class DataCollatorForLanguageModelingWithFullMasking(DataCollatorForLanguageMode
         return inputs, labels
 
 
-from transformers.integrations.mlflow import MLflowCallback
+from transformers.integrations.integration_utils import MLflowCallback
 
 class CustomMLflowCallback(MLflowCallback):
     def setup(self, args, state, model):
@@ -454,19 +454,25 @@ class CustomMLflowCallback(MLflowCallback):
         Override setup to handle parameter logging with value truncation
         """
         if state.is_world_process_zero:
+            if self._initialized:
+                return
+            self._initialized = True
+            
             combined_dict = args.to_dict()
             if hasattr(model, "config") and model.config is not None:
                 model_config = model.config.to_dict()
                 combined_dict = {**model_config, **combined_dict}
             
             # Truncate long parameter values and convert all values to strings
-            params_truncated = {
-                k: str(v)[:500] if isinstance(v, str) else str(v)
-                for k, v in combined_dict.items()
-            }
+            params_truncated = {}
+            for k, v in combined_dict.items():
+                if isinstance(v, (list, dict)):
+                    v = str(v)
+                if isinstance(v, str) and len(v) > 500:
+                    v = v[:500]
+                params_truncated[k] = v
             
             self._ml_flow.log_params(params_truncated)
-
 class MNTPTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -965,9 +971,10 @@ def main():
         pad_to_multiple_of=8 if pad_to_multiple_of_8 else None,
     )
 
-    callbacks = [StopTrainingCallback(custom_args.stop_after_n_steps)]
-    if training_args.logging_dir is not None:
-        callbacks.append(CustomMLflowCallback())
+    callbacks = [
+        StopTrainingCallback(custom_args.stop_after_n_steps),
+        CustomMLflowCallback()
+    ]
     
     trainer = MNTPTrainer(
         model=model,
@@ -988,7 +995,7 @@ def main():
             else None
         ),
     )
-    trainer.add_callback(StopTrainingCallback(custom_args.stop_after_n_steps))
+    #trainer.add_callback(StopTrainingCallback(custom_args.stop_after_n_steps))
 
     # Training
     if training_args.do_train:
