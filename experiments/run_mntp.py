@@ -446,18 +446,26 @@ class DataCollatorForLanguageModelingWithFullMasking(DataCollatorForLanguageMode
         return inputs, labels
 
 
-class StopTrainingCallback(TrainerCallback):
-    def __init__(self, stop_after_n_steps: int):
-        self.stop_after_n_steps = stop_after_n_steps
+from transformers.integrations.mlflow import MLflowCallback
 
-    def on_step_end(self, args, state, control, **kwargs):
-        if state.global_step >= self.stop_after_n_steps:
-            control.should_training_stop = True
-
-def truncate_dict_values(d, max_length=500):
-    """Truncate all string values in a dictionary to max_length characters."""
-    return {k: v if not isinstance(v, str) else v[:max_length] for k, v in d.__dict__.items() 
-            if not k.startswith('_')}
+class CustomMLflowCallback(MLflowCallback):
+    def setup(self, args, state, model):
+        """
+        Override setup to handle parameter logging with value truncation
+        """
+        if state.is_world_process_zero:
+            combined_dict = args.to_dict()
+            if hasattr(model, "config") and model.config is not None:
+                model_config = model.config.to_dict()
+                combined_dict = {**model_config, **combined_dict}
+            
+            # Truncate long parameter values and convert all values to strings
+            params_truncated = {
+                k: str(v)[:500] if isinstance(v, str) else str(v)
+                for k, v in combined_dict.items()
+            }
+            
+            self._ml_flow.log_params(params_truncated)
 
 class MNTPTrainer(Trainer):
     def __init__(self, *args, **kwargs):
@@ -957,7 +965,10 @@ def main():
         pad_to_multiple_of=8 if pad_to_multiple_of_8 else None,
     )
 
-    # Initialize our Trainer
+    callbacks = [StopTrainingCallback(custom_args.stop_after_n_steps)]
+    if training_args.logging_dir is not None:
+        callbacks.append(CustomMLflowCallback())
+    
     trainer = MNTPTrainer(
         model=model,
         args=training_args,
@@ -965,6 +976,7 @@ def main():
         eval_dataset=eval_dataset if training_args.do_eval else None,
         tokenizer=tokenizer,
         data_collator=data_collator,
+        callbacks=callbacks,
         compute_metrics=(
             compute_metrics
             if training_args.do_eval and not is_torch_tpu_available()
@@ -976,7 +988,6 @@ def main():
             else None
         ),
     )
-
     trainer.add_callback(StopTrainingCallback(custom_args.stop_after_n_steps))
 
     # Training
